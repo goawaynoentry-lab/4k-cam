@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>4K WebGL HD Webcam Studio</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --panel: #181b24;
+      --border: #2a2f3d;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --danger: #ef4444;
+      --success: #10b981;
+    }
+
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      display: grid;
+      grid-template-columns: 1fr 350px;
+      min-height: 100vh;
+    }
+
+    @media (max-width: 920px) {
+      body { grid-template-columns: 1fr; }
+    }
+
+    .stage {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      gap: 14px;
+    }
+
+    .video-wrap {
+      position: relative;
+      width: 100%;
+      max-width: 1200px;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      aspect-ratio: 16 / 9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    canvas {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    video { display: none; }
+
+    .hud {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      right: 12px;
+      display: flex;
+      justify-content: space-between;
+      pointer-events: none;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      background: rgba(15, 17, 23, 0.85);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #38bdf8;
+      backdrop-filter: blur(6px);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .badge.gpu { color: var(--success); }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.88rem;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.05s;
+      user-select: none;
+    }
+
+    button:hover { background: var(--accent-hover); }
+    button:active { transform: translateY(1px); }
+    button.secondary { background: var(--panel); border: 1px solid var(--border); }
+    button.secondary:hover { background: #232836; }
+    button.active { border-color: #38bdf8; color: #38bdf8; }
+    button.recording { background: var(--danger); border-color: var(--danger); }
+
+    .sidebar {
+      background: var(--panel);
+      border-left: 1px solid var(--border);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow-y: auto;
+    }
+
+    h2 { margin: 0; font-size: 1.05rem; }
+    h3 {
+      margin: 0 0 6px;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+
+    .control-group {
+      border-top: 1px solid var(--border);
+      padding-top: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    label {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 0.86rem;
+    }
+
+    .label-row {
+      display: flex;
+      justify-content: space-between;
+      color: var(--text);
+    }
+
+    .label-row span:last-child {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    select, input[type="range"] { width: 100%; }
+
+    select {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 8px 10px;
+      border-radius: 8px;
+    }
+
+    .hint {
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <main class="stage">
+    <div class="video-wrap">
+      <div class="hud">
+        <div class="badge" id="statsBadge">Initializing camera...</div>
+        <div class="badge gpu" id="gpuBadge">WebGL Shader: Ready</div>
+      </div>
+      <video id="rawVideo" autoplay playsinline muted></video>
+      <canvas id="outputCanvas"></canvas>
+    </div>
+
+    <div class="actions">
+      <button id="snapBtn">Take 4K/HD Snapshot</button>
+      <button id="recordBtn" class="secondary">Record 60fps Video</button>
+      <button id="compareBtn" class="secondary">Hold to Compare Raw</button>
+      <button id="mirrorBtn" class="secondary">Mirror: Off</button>
+      <button id="resetBtn" class="secondary">Reset All</button>
+    </div>
+  </main>
+
+  <aside class="sidebar">
+    <h2>4K WebGL Webcam Studio</h2>
+
+    <label>
+      <span>Camera Device</span>
+      <select id="cameraSelect"></select>
+    </label>
+
+    <label>
+      <span>Target Resolution</span>
+      <select id="resSelect">
+        <option value="1280x720">720p HD (1280 × 720)</option>
+        <option value="1920x1080">1080p Full HD (1920 × 1080)</option>
+        <option value="2560x1440">1440p QHD (2560 × 1440)</option>
+        <option value="3840x2160" selected>4K Ultra HD (3840 × 2160)</option>
+      </select>
+    </label>
+
+    <div class="control-group">
+      <h3>GPU Fragment Shader Grading</h3>
+
+      <label>
+        <div class="label-row"><span>Adaptive HD Sharpen</span><span id="sharpVal">35%</span></div>
+        <input type="range" id="sharpness" min="0" max="100" value="35" />
+      </label>
+
+      <label>
+        <div class="label-row"><span>Exposure / Brightness</span><span id="brightVal">105%</span></div>
+        <input type="range" id="brightness" min="50" max="175" value="105" />
+      </label>
+
+      <label>
+        <div class="label-row"><span>Dynamic Contrast</span><span id="contrastVal">110%</span></div>
+        <input type="range" id="contrast" min="50" max="175" value="110" />
+      </label>
+
+      <label>
+        <div class="label-row"><span>Color Saturation</span><span id="satVal">110%</span></div>
+        <input type="range" id="saturation" min="0" max="200" value="110" />
+      </label>
+
+      <label>
+        <div class="label-row"><span>White Balance Temp</span><span id="tempVal">0</span></div>
+        <input type="range" id="temperature" min="-50" max="50" value="0" />
+      </label>
+    </div>
+
+    <div class="control-group">
+      <h3>Hardware Sensor Controls</h3>
+      <div id="hardwareControls" class="hint">Loading driver capabilities...</div>
+    </div>
+  </aside>
+
+  <script>
+    const video = document.getElementById('rawVideo');
+    const canvas = document.getElementById('outputCanvas');
+    const statsBadge = document.getElementById('statsBadge');
+    const gpuBadge = document.getElementById('gpuBadge');
+    const cameraSelect = document.getElementById('cameraSelect');
+    const resSelect = document.getElementById('resSelect');
+    const hardwareControls = document.getElementById('hardwareControls');
+
+    const sliders = {
+      sharpness: document.getElementById('sharpness'),
+      brightness: document.getElementById('brightness'),
+      contrast: document.getElementById('contrast'),
+      saturation: document.getElementById('saturation'),
+      temperature: document.getElementById('temperature')
+    };
+
+    let currentStream = null;
+    let videoTrack = null;
+    let mirrored = false;
+    let bypassShader = false;
+    let mediaRecorder = null;
+    let recordedChunks = [];
+
+    // FPS Telemetry
+    let frameCounter = 0;
+    let lastFpsTime = performance.now();
+    let measuredFps = 0;
+    let activeStreamInfo = '';
+
+    // --- WebGL Setup ---
+    const gl = canvas.getContext('webgl', {
+      preserveDrawingBuffer: true,
+      antialias: false,
+      depth: false,
+      stencil: false,
+      powerPreference: 'high-performance'
+    });
+
+    if (!gl) {
+      gpuBadge.textContent = 'WebGL Unavailable';
+      gpuBadge.style.color = '#ef4444';
+    }
+
+    const VERTEX_SHADER_SRC = `
+      attribute vec2 a_position;
+      varying vec2 v_texCoord;
+      void main() {
+        gl_Position = vec4(a_position, 0.0, 1.0);
+        v_texCoord = vec2(a_position.x * 0.5 + 0.5, 1.0 - (a_position.y * 0.5 + 0.5));
+      }
+    `;
+
+    const FRAGMENT_SHADER_SRC = `
+      precision highp float;
+
+      uniform sampler2D u_image;
+      uniform vec2 u_texelSize;
+      uniform float u_sharpness;
+      uniform float u_brightness;
+      uniform float u_contrast;
+      uniform float u_saturation;
+      uniform float u_temperature;
+      uniform float u_mirror;
+      uniform float u_bypass;
+
+      varying vec2 v_texCoord;
+
+      void main() {
+        vec2 uv = v_texCoord;
+        if (u_mirror > 0.5) {
+          uv.x = 1.0 - uv.x;
+        }
+
+        vec3 center = texture2D(u_image, uv).rgb;
+
+        if (u_bypass > 0.5) {
+          gl_FragColor = vec4(center, 1.0);
+          return;
+        }
+
+        // 1. Edge-aware unsharp mask (prevents amplifying flat-area sensor noise)
+        vec3 color = center;
+        if (u_sharpness > 0.001) {
+          vec3 top    = texture2D(u_image, uv + vec2(0.0, -u_texelSize.y)).rgb;
+          vec3 bottom = texture2D(u_image, uv + vec2(0.0,  u_texelSize.y)).rgb;
+          vec3 left   = texture2D(u_image, uv + vec2(-u_texelSize.x, 0.0)).rgb;
+          vec3 right  = texture2D(u_image, uv + vec2( u_texelSize.x, 0.0)).rgb;
+
+          vec3 blur = (top + bottom + left + right) * 0.25;
+          vec3 detail = center - blur;
+
+          float edgeEnergy = length(detail);
+          float adaptiveMask = smoothstep(0.015, 0.12, edgeEnergy);
+          color = center + detail * (u_sharpness * 2.2 * adaptiveMask);
+        }
+
+        // 2. White balance temperature shift
+        color.r += u_temperature * 0.12;
+        color.b -= u_temperature * 0.12;
+
+        // 3. Exposure / brightness
+        color *= u_brightness;
+
+        // 4. Mid-gray pivoted contrast
+        color = (color - 0.5) * u_contrast + 0.5;
+
+        // 5. Rec.709 luminance-preserving saturation
+        float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+        color = mix(vec3(luma), color, u_saturation);
+
+        gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
+      }
+    `;
+
+    function compileShader(type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    }
+
+    let program = null;
+    let uniforms = {};
+    let videoTexture = null;
+
+    function initWebGL() {
+      if (!gl) return;
+
+      const vs = compileShader(gl.VERTEX_SHADER, VERTEX_SHADER_SRC);
+      const fs = compileShader(gl.FRAGMENT_SHADER, FRAGMENT_SHADER_SRC);
+
+      program = gl.createProgram();
+      gl.attachShader(program, vs);
+      gl.attachShader(program, fs);
+      gl.linkProgram(program);
+
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Program link error:', gl.getProgramInfoLog(program));
+        return;
+      }
+
+      gl.useProgram(program);
+
+      // Fullscreen quad
+      const quadBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]),
+        gl.STATIC_DRAW
+      );
+
+      const posLoc = gl.getAttribLocation(program, 'a_position');
+      gl.enableVertexAttribArray(posLoc);
+      gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+      uniforms = {
+        image: gl.getUniformLocation(program, 'u_image'),
+        texelSize: gl.getUniformLocation(program, 'u_texelSize'),
+        sharpness: gl.getUniformLocation(program, 'u_sharpness'),
+        brightness: gl.getUniformLocation(program, 'u_brightness'),
+        contrast: gl.getUniformLocation(program, 'u_contrast'),
+        saturation: gl.getUniformLocation(program, 'u_saturation'),
+        temperature: gl.getUniformLocation(program, 'u_temperature'),
+        mirror: gl.getUniformLocation(program, 'u_mirror'),
+        bypass: gl.getUniformLocation(program, 'u_bypass')
+      };
+
+      videoTexture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, videoTexture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+      gl.uniform1i(uniforms.image, 0);
+
+      const debugExt = gl.getExtension('WEBGL_debug_renderer_info');
+      if (debugExt) {
+        const renderer = gl.getParameter(debugExt.UNMASKED_RENDERER_WEBGL);
+        gpuBadge.textContent = `GPU: ${renderer.split('(')[0].trim()}`;
+      }
+    }
+
+    canvas.addEventListener('webglcontextlost', e => {
+      e.preventDefault();
+      gpuBadge.textContent = 'WebGL Context Lost';
+      gpuBadge.style.color = '#ef4444';
+    });
+
+    canvas.addEventListener('webglcontextrestored', () => {
+      initWebGL();
+      gpuBadge.style.color = '#10b981';
+    });
+
+    function updateLabels() {
+      document.getElementById('sharpVal').textContent = `${sliders.sharpness.value}%`;
+      document.getElementById('brightVal').textContent = `${sliders.brightness.value}%`;
+      document.getElementById('contrastVal').textContent = `${sliders.contrast.value}%`;
+      document.getElementById('satVal').textContent = `${sliders.saturation.value}%`;
+      const t = Number(sliders.temperature.value);
+      document.getElementById('tempVal').textContent = t > 0 ? `+${t}` : `${t}`;
+    }
+
+    Object.values(sliders).forEach(input => input.addEventListener('input', updateLabels));
+
+    async function populateCameras() {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cams = devices.filter(d => d.kind === 'videoinput');
+      const prev = cameraSelect.value;
+      cameraSelect.innerHTML = '';
+      cams.forEach((cam, idx) => {
+        const opt = document.createElement('option');
+        opt.value = cam.deviceId;
+        opt.textContent = cam.label || `Camera ${idx + 1}`;
+        cameraSelect.appendChild(opt);
+      });
+      if (prev) cameraSelect.value = prev;
+    }
+
+    function renderHardwareControls(track) {
+      hardwareControls.innerHTML = '';
+      if (!track.getCapabilities) {
+        hardwareControls.textContent = 'Hardware driver controls are not supported in this browser.';
+        return;
+      }
+
+      const caps = track.getCapabilities();
+      const settings = track.getSettings();
+      const tunable = [
+        { key: 'brightness', label: 'Sensor Brightness' },
+        { key: 'contrast', label: 'Sensor Contrast' },
+        { key: 'saturation', label: 'Sensor Saturation' },
+        { key: 'sharpness', label: 'Sensor Sharpness' },
+        { key: 'zoom', label: 'Optical / Digital Zoom' }
+      ];
+
+      let count = 0;
+      tunable.forEach(({ key, label }) => {
+        if (caps[key] && typeof caps[key].min === 'number') {
+          count++;
+          const wrapper = document.createElement('label');
+          const initial = settings[key] ?? caps[key].min;
+          wrapper.innerHTML = `
+            <div class="label-row"><span>${label}</span><span id="hw_${key}_val">${initial}</span></div>
+            <input type="range" min="${caps[key].min}" max="${caps[key].max}" step="${caps[key].step || 1}" value="${initial}" />
+          `;
+          const range = wrapper.querySelector('input');
+          const valSpan = wrapper.querySelector(`#hw_${key}_val`);
+          range.addEventListener('input', async () => {
+            const num = Number(range.value);
+            valSpan.textContent = num;
+            try {
+              await track.applyConstraints({ advanced: [{ [key]: num }] });
+            } catch (err) {
+              console.warn(`Failed setting ${key}:`, err);
+            }
+          });
+          hardwareControls.appendChild(wrapper);
+        }
+      });
+
+      if (count === 0) {
+        hardwareControls.textContent = 'Camera driver locks sensor sliders; using GPU shader controls above.';
+      }
+    }
+
+    async function startCamera() {
+      if (currentStream) {
+        currentStream.getTracks().forEach(t => t.stop());
+      }
+
+      const [reqW, reqH] = resSelect.value.split('x').map(Number);
+      const constraints = {
+        audio: false,
+        video: {
+          deviceId: cameraSelect.value ? { exact: cameraSelect.value } : undefined,
+          width: { ideal: reqW },
+          height: { ideal: reqH },
+          frameRate: { ideal: 60, min: 30 }
+        }
+      };
+
+      try {
+        currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = currentStream;
+        videoTrack = currentStream.getVideoTracks()[0];
+
+        await populateCameras();
+        if (videoTrack.getSettings().deviceId) {
+          cameraSelect.value = videoTrack.getSettings().deviceId;
+        }
+
+        await video.play();
+        canvas.width = video.videoWidth || reqW;
+        canvas.height = video.videoHeight || reqH;
+        if (gl) gl.viewport(0, 0, canvas.width, canvas.height);
+
+        const actual = videoTrack.getSettings();
+        const targetFps = actual.frameRate ? `${Math.round(actual.frameRate)}fps stream` : '';
+        activeStreamInfo = `${canvas.width} × ${canvas.height} (${targetFps})`;
+        statsBadge.textContent = activeStreamInfo;
+
+        renderHardwareControls(videoTrack);
+      } catch (err) {
+        statsBadge.textContent = `Camera error: ${err.message}`;
+      }
+    }
+
+    function renderFrame() {
+      if (gl && program && video.readyState >= 2) {
+        if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          gl.viewport(0, 0, canvas.width, canvas.height);
+        }
+
+        gl.useProgram(program);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, videoTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+
+        gl.uniform2f(uniforms.texelSize, 1.0 / canvas.width, 1.0 / canvas.height);
+        gl.uniform1f(uniforms.sharpness, Number(sliders.sharpness.value) / 100);
+        gl.uniform1f(uniforms.brightness, Number(sliders.brightness.value) / 100);
+        gl.uniform1f(uniforms.contrast, Number(sliders.contrast.value) / 100);
+        gl.uniform1f(uniforms.saturation, Number(sliders.saturation.value) / 100);
+        gl.uniform1f(uniforms.temperature, Number(sliders.temperature.value) / 50);
+        gl.uniform1f(uniforms.mirror, mirrored ? 1.0 : 0.0);
+        gl.uniform1f(uniforms.bypass, bypassShader ? 1.0 : 0.0);
+
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+        // Live render FPS counter
+        frameCounter++;
+        const now = performance.now();
+        if (now - lastFpsTime >= 1000) {
+          measuredFps = Math.round((frameCounter * 1000) / (now - lastFpsTime));
+          frameCounter = 0;
+          lastFpsTime = now;
+          if (activeStreamInfo) {
+            statsBadge.textContent = `${activeStreamInfo} • Render: ${measuredFps} fps`;
+          }
+        }
+      }
+
+      if ('requestVideoFrameCallback' in video) {
+        video.requestVideoFrameCallback(renderFrame);
+      } else {
+        requestAnimationFrame(renderFrame);
+      }
+    }
+
+    document.getElementById('snapBtn').addEventListener('click', () => {
+      const link = document.createElement('a');
+      link.download = `webgl-hd-${canvas.width}x${canvas.height}-${Date.now()}.png`;
+      link.href = canvas.toDataURL('image/png');
+      link.click();
+    });
+
+    const recordBtn = document.getElementById('recordBtn');
+    recordBtn.addEventListener('click', () => {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        recordBtn.textContent = 'Record 60fps Video';
+        recordBtn.classList.remove('recording');
+        return;
+      }
+
+      recordedChunks = [];
+      const stream = canvas.captureStream(60);
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+        ? 'video/webm;codecs=vp9'
+        : 'video/webm';
+
+      mediaRecorder = new MediaRecorder(stream, {
+        mimeType,
+        videoBitsPerSecond: 16_000_000
+      });
+
+      mediaRecorder.ondataavailable = e => {
+        if (e.data.size > 0) recordedChunks.push(e.data);
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunks, { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `webgl-60fps-${canvas.width}x${canvas.height}-${Date.now()}.webm`;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      mediaRecorder.start();
+      recordBtn.textContent = 'Stop Recording';
+      recordBtn.classList.add('recording');
+    });
+
+    const compareBtn = document.getElementById('compareBtn');
+    const setBypass = state => {
+      bypassShader = state;
+      compareBtn.classList.toggle('active', state);
+      compareBtn.textContent = state ? 'Showing Raw Camera' : 'Hold to Compare Raw';
+    };
+    compareBtn.addEventListener('pointerdown', () => setBypass(true));
+    compareBtn.addEventListener('pointerup', () => setBypass(false));
+    compareBtn.addEventListener('pointerleave', () => setBypass(false));
+
+    const mirrorBtn = document.getElementById('mirrorBtn');
+    mirrorBtn.addEventListener('click', () => {
+      mirrored = !mirrored;
+      mirrorBtn.textContent = `Mirror: ${mirrored ? 'On' : 'Off'}`;
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      sliders.sharpness.value = 35;
+      sliders.brightness.value = 105;
+      sliders.contrast.value = 110;
+      sliders.saturation.value = 110;
+      sliders.temperature.value = 0;
+      updateLabels();
+    });
+
+    cameraSelect.addEventListener('change', startCamera);
+    resSelect.addEventListener('change', startCamera);
+
+    initWebGL();
+    updateLabels();
+    startCamera().then(() => {
+      if ('requestVideoFrameCallback' in video) {
+        video.requestVideoFrameCallback(renderFrame);
+      } else {
+        requestAnimationFrame(renderFrame);
+      }
+    });
+  </script>
+</body>
+</html>
